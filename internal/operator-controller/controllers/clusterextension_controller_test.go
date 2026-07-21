@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes/fake"
@@ -946,7 +947,6 @@ func TestValidateClusterExtension(t *testing.T) {
 		{
 			name: "service account not found",
 			validators: []controllers.ClusterExtensionValidator{
-				// Create a different ServiceAccount to ensure "test-sa" is not found.
 				serviceAccountValidatorWithFakeClient(&corev1.ServiceAccount{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "not-test-sa",
@@ -968,6 +968,14 @@ func TestValidateClusterExtension(t *testing.T) {
 				}),
 			},
 			expectError: false,
+		},
+		{
+			name: "service account not found - no SA in cluster",
+			validators: []controllers.ClusterExtensionValidator{
+				serviceAccountValidatorWithFakeClient(nil),
+			},
+			expectError:          true,
+			errorMessageIncludes: `service account "test-sa" not found in namespace "test-ns"`,
 		},
 	}
 
@@ -1025,6 +1033,92 @@ func TestValidateClusterExtension(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, cl.Get(ctx, extKey, clusterExtension))
 				require.Empty(t, clusterExtension.Status.Conditions)
+			}
+			require.NoError(t, cl.DeleteAllOf(ctx, &ocv1.ClusterExtension{}))
+		})
+	}
+}
+
+func TestResolveNamespace(t *testing.T) {
+	tests := []struct {
+		name                 string
+		specNamespace        string
+		namespaceObjects     []runtime.Object
+		expectError          bool
+		errorMessageIncludes string
+	}{
+		{
+			name:          "user-provided namespace exists",
+			specNamespace: "existing-ns",
+			namespaceObjects: []runtime.Object{
+				&corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "existing-ns",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:                 "user-provided namespace not found",
+			specNamespace:        "missing-ns",
+			namespaceObjects:     nil,
+			expectError:          true,
+			errorMessageIncludes: `namespace "missing-ns" not found`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			objects := make([]runtime.Object, 0, len(tt.namespaceObjects))
+			objects = append(objects, tt.namespaceObjects...)
+			fakeClient := fake.NewClientset(objects...)
+
+			cl := newClient(t)
+			reconciler := &controllers.ClusterExtensionReconciler{
+				Client: cl,
+				ReconcileSteps: controllers.ReconcileSteps{
+					controllers.HandleFinalizers(crfinalizer.NewFinalizers()),
+					controllers.ResolveNamespace(fakeClient.CoreV1()),
+				},
+			}
+
+			extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
+
+			clusterExtension := &ocv1.ClusterExtension{
+				ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
+				Spec: ocv1.ClusterExtensionSpec{
+					Source: ocv1.SourceConfig{
+						SourceType: "Catalog",
+						Catalog: &ocv1.CatalogFilter{
+							PackageName: "test-package",
+						},
+					},
+					Namespace: tt.specNamespace,
+					ServiceAccount: ocv1.ServiceAccountReference{
+						Name: "test-sa",
+					},
+				},
+			}
+
+			require.NoError(t, cl.Create(ctx, clusterExtension))
+
+			res, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: extKey})
+			require.Equal(t, ctrl.Result{}, res)
+			if tt.expectError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errorMessageIncludes)
+
+				require.NoError(t, cl.Get(ctx, extKey, clusterExtension))
+				progressingCond := apimeta.FindStatusCondition(clusterExtension.Status.Conditions, ocv1.TypeProgressing)
+				require.NotNil(t, progressingCond)
+				require.Equal(t, metav1.ConditionFalse, progressingCond.Status)
+				require.Equal(t, ocv1.ReasonBlocked, progressingCond.Reason)
+				require.Contains(t, progressingCond.Message, tt.errorMessageIncludes)
+			} else {
+				require.NoError(t, err)
 			}
 			require.NoError(t, cl.DeleteAllOf(ctx, &ocv1.ClusterExtension{}))
 		})
@@ -3035,8 +3129,10 @@ func TestCheckCatalogsExist(t *testing.T) {
 }
 
 func serviceAccountValidatorWithFakeClient(serviceAccount *corev1.ServiceAccount) controllers.ClusterExtensionValidator {
-	if serviceAccount == nil {
-		return controllers.ServiceAccountValidator(fake.NewClientset().CoreV1())
+	objects := []runtime.Object{}
+	if serviceAccount != nil {
+		objects = append(objects, serviceAccount)
 	}
-	return controllers.ServiceAccountValidator(fake.NewClientset(serviceAccount).CoreV1())
+	fakeClient := fake.NewClientset(objects...)
+	return controllers.ServiceAccountValidator(fakeClient.CoreV1())
 }

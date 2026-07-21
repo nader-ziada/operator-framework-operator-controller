@@ -301,7 +301,7 @@ func TestClusterExtensionAdmissionInstallNamespace(t *testing.T) {
 	}{
 		{"just alphanumeric", "justalphanumberic1", ""},
 		{"hypen-separated", "hyphenated-name", ""},
-		{"no install namespace", "", regexMismatchError},
+		{"no install namespace (managed mode)", "", ""},
 		{"dot-separated", "dotted.name", regexMismatchError},
 		{"longest valid install namespace", strings.Repeat("x", 63), ""},
 		{"too long install namespace name", strings.Repeat("x", 64), tooLongError},
@@ -338,6 +338,87 @@ func TestClusterExtensionAdmissionInstallNamespace(t *testing.T) {
 			} else {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.errMsg)
+			}
+		})
+	}
+}
+
+func TestClusterExtensionAdmissionNamespaceImmutability(t *testing.T) {
+	baseSpec := func(ns string) ocv1.ClusterExtensionSpec {
+		return ocv1.ClusterExtensionSpec{
+			Source: ocv1.SourceConfig{
+				SourceType: "Catalog",
+				Catalog: &ocv1.CatalogFilter{
+					PackageName: "package",
+				},
+			},
+			Namespace: ns,
+			ServiceAccount: ocv1.ServiceAccountReference{
+				Name: "default",
+			},
+		}
+	}
+
+	testCases := []struct {
+		name        string
+		initialNS   string
+		updatedNS   string
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:      "set to same value - allowed",
+			initialNS: "my-ns",
+			updatedNS: "my-ns",
+			expectErr: false,
+		},
+		{
+			name:        "set to different value - rejected",
+			initialNS:   "my-ns",
+			updatedNS:   "other-ns",
+			expectErr:   true,
+			errContains: "namespace is immutable once set",
+		},
+		{
+			name:        "empty to set - rejected",
+			initialNS:   "",
+			updatedNS:   "my-ns",
+			expectErr:   true,
+			errContains: "namespace cannot be set after creation",
+		},
+		{
+			name:      "empty to empty - allowed",
+			initialNS: "",
+			updatedNS: "",
+			expectErr: false,
+		},
+		{
+			name:        "set to empty - rejected",
+			initialNS:   "my-ns",
+			updatedNS:   "",
+			expectErr:   true,
+			errContains: "namespace is immutable once set",
+		},
+	}
+
+	t.Parallel()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cl := newClient(t)
+			ctx := context.Background()
+
+			ext := buildClusterExtension(baseSpec(tc.initialNS))
+			require.NoError(t, cl.Create(ctx, ext))
+
+			ext.Spec.Namespace = tc.updatedNS
+			err := cl.Update(ctx, ext)
+			if !tc.expectErr {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.errContains)
 			}
 		})
 	}

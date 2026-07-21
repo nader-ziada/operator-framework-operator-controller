@@ -29,8 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/finalizer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	ocv1 "github.com/operator-framework/operator-controller/api/v1"
+	"github.com/operator-framework/operator-controller/internal/operator-controller/applier"
 	"github.com/operator-framework/operator-controller/internal/operator-controller/bundleutil"
 	"github.com/operator-framework/operator-controller/internal/operator-controller/labels"
 	"github.com/operator-framework/operator-controller/internal/operator-controller/resolve"
@@ -102,6 +104,9 @@ func ValidateClusterExtension(validators ...ClusterExtensionValidator) Reconcile
 // ServiceAccount exists in the cluster by performing a direct Get call.
 func ServiceAccountValidator(saClient corev1client.ServiceAccountsGetter) ClusterExtensionValidator {
 	return func(ctx context.Context, ext *ocv1.ClusterExtension) error {
+		if ext.Spec.Namespace == "" {
+			return nil
+		}
 		_, err := saClient.ServiceAccounts(ext.Spec.Namespace).Get(ctx, ext.Spec.ServiceAccount.Name, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -407,6 +412,73 @@ func UnpackBundle(i imageutil.Puller, cache imageutil.Cache) ReconcileStepFunc {
 	}
 }
 
+func ResolveNamespace(nsClient corev1client.NamespacesGetter) ReconcileStepFunc {
+	return func(ctx context.Context, state *reconcileState, ext *ocv1.ClusterExtension) (*ctrl.Result, error) {
+		l := log.FromContext(ctx)
+
+		if ext.Spec.Namespace != "" {
+			l.V(1).Info("validating user-provided namespace exists", "namespace", ext.Spec.Namespace)
+			_, err := nsClient.Namespaces().Get(ctx, ext.Spec.Namespace, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				err := fmt.Errorf("namespace %q not found; spec.namespace must reference an existing namespace", ext.Spec.Namespace)
+				setStatusProgressing(ext, reconcile.TerminalError(err))
+				return nil, err
+			}
+			if err != nil {
+				return nil, fmt.Errorf("error checking namespace %q: %w", ext.Spec.Namespace, err)
+			}
+			state.resolvedNamespace = ext.Spec.Namespace
+			state.namespaceManaged = false
+			return nil, nil
+		}
+
+		// Managed mode: resolve name from bundle annotations
+		if state.imageFS == nil {
+			return nil, nil
+		}
+
+		bundleAnnotations, err := applier.GetBundleAnnotations(state.imageFS)
+		if err != nil {
+			return nil, fmt.Errorf("error reading bundle annotations: %w", err)
+		}
+
+		packageName := getPackageName(ext)
+		resolvedName, template, err := applier.ResolveNamespaceName(bundleAnnotations, packageName)
+		if err != nil {
+			err := fmt.Errorf("error resolving namespace from bundle annotations: %w", err)
+			setStatusProgressing(ext, reconcile.TerminalError(err))
+			return nil, err
+		}
+
+		if ext.Status.Namespace != "" && ext.Status.Namespace != resolvedName {
+			err := fmt.Errorf("bundle upgrade changes managed namespace from %q to %q; this is not supported", ext.Status.Namespace, resolvedName)
+			setStatusProgressing(ext, reconcile.TerminalError(err))
+			return nil, err
+		}
+
+		// On first install, verify managed namespace does not already exist.
+		// On upgrade (status.Namespace already set), skip this check — the namespace was created by us.
+		if ext.Status.Namespace == "" {
+			l.V(1).Info("checking managed namespace does not already exist", "namespace", resolvedName)
+			_, getErr := nsClient.Namespaces().Get(ctx, resolvedName, metav1.GetOptions{})
+			if getErr == nil {
+				err := fmt.Errorf("managed namespace %q already exists; use spec.namespace to install into an existing namespace", resolvedName)
+				setStatusProgressing(ext, reconcile.TerminalError(err))
+				return nil, err
+			}
+			if !apierrors.IsNotFound(getErr) {
+				return nil, fmt.Errorf("error checking namespace %q: %w", resolvedName, getErr)
+			}
+		}
+
+		state.resolvedNamespace = resolvedName
+		state.namespaceManaged = true
+		state.namespaceTemplate = template
+		l.Info("resolved managed namespace", "namespace", resolvedName)
+		return nil, nil
+	}
+}
+
 func ApplyBundle(a Applier) ReconcileStepFunc {
 	return func(ctx context.Context, state *reconcileState, ext *ocv1.ClusterExtension) (*ctrl.Result, error) {
 		l := log.FromContext(ctx)
@@ -435,6 +507,8 @@ func ApplyBundle(a Applier) ReconcileStepFunc {
 		//   - Permission errors (it is not possible to watch changes to permissions.
 		//     The only way to eventually recover from permission errors is to keep retrying).
 		rolloutSucceeded, rolloutStatus, err := a.Apply(ctx, state.imageFS, ext, objLbls, revisionAnnotations)
+
+		ext.Status.Namespace = state.resolvedNamespace
 
 		// Set installed status
 		if rolloutSucceeded {
