@@ -137,7 +137,6 @@ func ApplyBundleWithBoxcutter(apply func(ctx context.Context, contentFS fs.FS, e
 			return nil, err
 		}
 
-		ext.Status.Namespace = state.resolvedNamespace
 		ext.Status.ActiveRevisions = []ocv1.RevisionStatus{}
 		// Mirror Available/Progressing conditions from the installed revision
 		if i := state.revisionStates.Installed; i != nil {

@@ -574,12 +574,6 @@ spec:
                 required:
                 - bundle
                 type: object
-              namespace:
-                description: |-
-                  namespace is the resolved namespace where the extension is installed.
-                  For user-provided namespaces, this mirrors spec.namespace.
-                  For managed namespaces, this shows the name resolved from bundle metadata.
-                type: string
             type: object
         type: object
     served: true

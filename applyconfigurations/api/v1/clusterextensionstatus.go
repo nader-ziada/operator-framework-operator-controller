@@ -51,10 +51,6 @@ type ClusterExtensionStatusApplyConfiguration struct {
 	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// install is a representation of the current installation status for this ClusterExtension.
 	Install *ClusterExtensionInstallStatusApplyConfiguration `json:"install,omitempty"`
-	// namespace is the resolved namespace where the extension is installed.
-	// For user-provided namespaces, this mirrors spec.namespace.
-	// For managed namespaces, this shows the name resolved from bundle metadata.
-	Namespace *string `json:"namespace,omitempty"`
 	// activeRevisions holds a list of currently active (non-archived) ClusterObjectSets,
 	// including both installed and rolling out revisions.
 	// <opcon:experimental>
@@ -85,14 +81,6 @@ func (b *ClusterExtensionStatusApplyConfiguration) WithConditions(values ...*met
 // If called multiple times, the Install field is set to the value of the last call.
 func (b *ClusterExtensionStatusApplyConfiguration) WithInstall(value *ClusterExtensionInstallStatusApplyConfiguration) *ClusterExtensionStatusApplyConfiguration {
 	b.Install = value
-	return b
-}
-
-// WithNamespace sets the Namespace field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Namespace field is set to the value of the last call.
-func (b *ClusterExtensionStatusApplyConfiguration) WithNamespace(value string) *ClusterExtensionStatusApplyConfiguration {
-	b.Namespace = &value
 	return b
 }
 

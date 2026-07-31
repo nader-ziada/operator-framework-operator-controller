@@ -549,13 +549,6 @@ type ClusterExtensionStatus struct {
 	// +optional
 	Install *ClusterExtensionInstallStatus `json:"install,omitempty"`
 
-	// namespace is the resolved namespace where the extension is installed.
-	// For user-provided namespaces, this mirrors spec.namespace.
-	// For managed namespaces, this shows the name resolved from bundle metadata.
-	//
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
 	// activeRevisions holds a list of currently active (non-archived) ClusterObjectSets,
 	// including both installed and rolling out revisions.
 	// +listType=map

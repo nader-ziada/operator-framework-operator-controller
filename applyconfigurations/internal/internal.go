@@ -248,9 +248,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: install
       type:
         namedType: com.github.operator-framework.operator-controller.api.v1.ClusterExtensionInstallStatus
-    - name: namespace
-      type:
-        scalar: string
 - name: com.github.operator-framework.operator-controller.api.v1.ClusterObjectSet
   map:
     fields:

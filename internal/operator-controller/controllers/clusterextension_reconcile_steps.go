@@ -427,13 +427,8 @@ func ResolveNamespace(nsClient corev1client.NamespacesGetter) ReconcileStepFunc 
 		}
 
 		// Managed mode: resolve name from bundle annotations.
-		// If imageFS is nil (fallback path), preserve the previously resolved namespace
-		// from status to avoid wiping it in later steps.
+		// If imageFS is nil (fallback path), we cannot resolve. return early.
 		if state.imageFS == nil {
-			if ext.Status.Namespace != "" {
-				state.resolvedNamespace = ext.Status.Namespace
-				state.namespaceManaged = true
-			}
 			return nil, nil
 		}
 
@@ -450,15 +445,9 @@ func ResolveNamespace(nsClient corev1client.NamespacesGetter) ReconcileStepFunc 
 			return nil, termErr
 		}
 
-		if ext.Status.Namespace != "" && ext.Status.Namespace != resolvedName {
-			termErr := reconcile.TerminalError(fmt.Errorf("bundle upgrade changes managed namespace from %q to %q; this is not supported", ext.Status.Namespace, resolvedName))
-			setStatusProgressing(ext, termErr)
-			return nil, termErr
-		}
-
 		// On first install, verify managed namespace does not already exist.
-		// On upgrade (status.Namespace already set), skip this check — the namespace was created by us.
-		if ext.Status.Namespace == "" {
+		// On upgrade (Install status set), skip — the namespace was created by us.
+		if ext.Status.Install == nil {
 			l.V(1).Info("checking managed namespace does not already exist", "namespace", resolvedName)
 			_, getErr := nsClient.Namespaces().Get(ctx, resolvedName, metav1.GetOptions{})
 			if getErr == nil {
@@ -513,8 +502,6 @@ func ApplyBundle(a Applier) ReconcileStepFunc {
 		//   - Permission errors (it is not possible to watch changes to permissions.
 		//     The only way to eventually recover from permission errors is to keep retrying).
 		rolloutSucceeded, rolloutStatus, err := a.Apply(ctx, state.imageFS, ext, objLbls, revisionAnnotations)
-
-		ext.Status.Namespace = state.resolvedNamespace
 
 		// Set installed status
 		if rolloutSucceeded {
