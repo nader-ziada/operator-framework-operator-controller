@@ -8,6 +8,8 @@ When you specify `spec.namespace`, the namespace must already exist on the clust
 
 The mode is locked at creation time: you cannot switch between managed and user-provided after the ClusterExtension is created.
 
+Managed mode requires the `BoxcutterRuntime` feature gate. Without it, omitting `spec.namespace` results in a terminal error, so you must set `spec.namespace` to an existing namespace instead.
+
 > **Note:** The behavior described in this document applies to the registry+v1 bundle format. Other bundle formats are likely to handle namespace management differently — for example, by including namespace objects directly in their manifests. This points toward namespace configuration being bundle-format-specific rather than a top-level ClusterExtension concern.
 
 ## Namespace resolution
@@ -15,7 +17,7 @@ The mode is locked at creation time: you cannot switch between managed and user-
 For registry+v1 bundles in managed mode, the namespace name is resolved from CSV annotations in this order:
 
 1. `operatorframework.io/suggested-namespace-template`: the `metadata.name` field from the JSON template
-2. `operators.operatorframework.io/suggested-namespace`: a plain string with the preferred name
+2. `operatorframework.io/suggested-namespace`: a plain string with the preferred name
 3. `<packageName>-system`: convention fallback
 
 ## What belongs in a managed namespace

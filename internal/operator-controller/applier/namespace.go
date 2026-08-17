@@ -15,7 +15,7 @@ var dns1123LabelRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 const (
 	AnnotationSuggestedNamespaceTemplate = "operatorframework.io/suggested-namespace-template"
-	AnnotationSuggestedNamespace         = "operators.operatorframework.io/suggested-namespace"
+	AnnotationSuggestedNamespace         = "operatorframework.io/suggested-namespace"
 )
 
 func ParseNamespaceTemplate(csvAnnotations map[string]string) (*corev1.Namespace, error) {

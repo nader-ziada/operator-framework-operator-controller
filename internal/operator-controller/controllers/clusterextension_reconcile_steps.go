@@ -445,17 +445,25 @@ func ResolveNamespace(nsClient corev1client.NamespacesGetter) ReconcileStepFunc 
 			return nil, termErr
 		}
 
-		// On first install, verify managed namespace does not already exist.
-		// On upgrade (Install status set), skip — the namespace was created by us.
+		// On first install, verify the managed namespace is not a pre-existing
+		// namespace we don't own. Managed mode owns the full lifecycle of its
+		// namespace, so it must not adopt one created outside this ClusterExtension.
+		// The namespace we create ourselves carries the owner-name label, so an
+		// existing namespace bearing our label (e.g. created by an earlier reconcile
+		// of this same install) is fine and must not trip this check, otherwise the
+		// install would deadlock against the namespace it just created.
+		// On upgrade (Install status set), skip, the namespace is already ours.
 		if ext.Status.Install == nil {
-			l.V(1).Info("checking managed namespace does not already exist", "namespace", resolvedName)
-			_, getErr := nsClient.Namespaces().Get(ctx, resolvedName, metav1.GetOptions{})
-			if getErr == nil {
-				termErr := reconcile.TerminalError(fmt.Errorf("managed namespace %q already exists; use spec.namespace to install into an existing namespace", resolvedName))
-				setStatusProgressing(ext, termErr)
-				return nil, termErr
-			}
-			if !apierrors.IsNotFound(getErr) {
+			l.V(1).Info("checking managed namespace is not a pre-existing foreign namespace", "namespace", resolvedName)
+			existing, getErr := nsClient.Namespaces().Get(ctx, resolvedName, metav1.GetOptions{})
+			switch {
+			case getErr == nil:
+				if existing.GetLabels()[labels.OwnerNameKey] != ext.GetName() {
+					termErr := reconcile.TerminalError(fmt.Errorf("managed namespace %q already exists and is not managed by this ClusterExtension; use spec.namespace to install into an existing namespace", resolvedName))
+					setStatusProgressing(ext, termErr)
+					return nil, termErr
+				}
+			case !apierrors.IsNotFound(getErr):
 				return nil, fmt.Errorf("error checking namespace %q: %w", resolvedName, getErr)
 			}
 		}

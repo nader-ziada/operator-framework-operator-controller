@@ -29,13 +29,13 @@ metadata:
       }
 ```
 
-### `operators.operatorframework.io/suggested-namespace`
+### `operatorframework.io/suggested-namespace`
 
 Simple namespace name without metadata. Use this when you want a specific name but don't need labels or annotations.
 
 ```yaml
 annotations:
-  operators.operatorframework.io/suggested-namespace: my-operator-system
+  operatorframework.io/suggested-namespace: my-operator-system
 ```
 
 ### No annotation
@@ -55,4 +55,4 @@ If both annotations are present, `suggested-namespace-template` takes priority.
 
 ## Consistency across bundle formats
 
-The `operatorframework.io/suggested-namespace-template` and `operators.operatorframework.io/suggested-namespace` annotations are the canonical way to declare namespace preferences. Future bundle formats should use the same annotation keys to avoid divergence across the ecosystem.
+The `operatorframework.io/suggested-namespace-template` and `operatorframework.io/suggested-namespace` annotations are the canonical way to declare namespace preferences. Future bundle formats should use the same annotation keys to avoid divergence across the ecosystem.
