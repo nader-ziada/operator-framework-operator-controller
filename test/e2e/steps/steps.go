@@ -186,7 +186,7 @@ func RegisterSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^(?i)ValidatingAdmissionPolicy "([^"]+)" is active$`, ValidatingAdmissionPolicyIsActive)
 
 	sc.Step(`^(?i)namespace "([^"]+)" has labels$`, NamespaceHasLabels)
-	sc.Step(`^(?i)namespace "([^"]+)" does not have label "([^"]+)"$`, NamespaceDoesNotHaveLabel)
+	sc.Step(`^(?i)namespace "([^"]+)" has no owner references$`, NamespaceHasNoOwnerReferences)
 
 	sc.Step(`^(?i)operator "([^"]+)" target namespace is "([^"]+)"$`, OperatorTargetNamespace)
 	sc.Step(`^(?i)Prometheus metrics are returned in the response$`, PrometheusMetricsAreReturned)
@@ -2494,8 +2494,8 @@ func NamespaceHasLabels(ctx context.Context, nsName string, table *godog.Table) 
 	return nil
 }
 
-// NamespaceDoesNotHaveLabel verifies a namespace does not have the specified label.
-func NamespaceDoesNotHaveLabel(ctx context.Context, nsName string, labelKey string) error {
+// NamespaceHasNoOwnerReferences verifies a namespace remains unmanaged after installation.
+func NamespaceHasNoOwnerReferences(ctx context.Context, nsName string) error {
 	sc := scenarioCtx(ctx)
 	nsName = substituteScenarioVars(nsName, sc)
 
@@ -2507,8 +2507,8 @@ func NamespaceDoesNotHaveLabel(ctx context.Context, nsName string, labelKey stri
 	if err := json.Unmarshal([]byte(out), &obj); err != nil {
 		return fmt.Errorf("failed to unmarshal namespace: %w", err)
 	}
-	if v, ok := obj.GetLabels()[labelKey]; ok {
-		return fmt.Errorf("namespace %q has unexpected label %s=%s", nsName, labelKey, v)
+	if refs := obj.GetOwnerReferences(); len(refs) != 0 {
+		return fmt.Errorf("namespace %q has unexpected owner references: %v", nsName, refs)
 	}
 	return nil
 }
